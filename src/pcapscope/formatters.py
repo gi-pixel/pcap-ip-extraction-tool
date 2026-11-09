@@ -71,6 +71,7 @@ def format_json(stats: list[IPStats], summary: ParseSummary) -> str:
                 "last_seen": s.last_seen,
                 "first_seen_iso": _fmt_ts(s.first_seen),
                 "last_seen_iso": _fmt_ts(s.last_seen),
+                "enriched": s.enriched,
             }
             for s in stats
         ],
@@ -103,7 +104,6 @@ def format_csv(stats: list[IPStats], summary: ParseSummary) -> str:
                 _fmt_ts(s.last_seen),
             ]
         )
-    # Summary rows below the table, as comment lines, so the CSV stays parseable.
     writer.writerow([])
     for line in _summary_lines(summary):
         writer.writerow([line])

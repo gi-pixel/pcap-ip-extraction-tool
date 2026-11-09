@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -28,6 +29,7 @@ class IPStats:
     first_seen: float = 0.0
     last_seen: float = 0.0
     scope: str = ""
+    enriched: dict[str, Any] = field(default_factory=dict)
 
     @property
     def total_packets(self) -> int:

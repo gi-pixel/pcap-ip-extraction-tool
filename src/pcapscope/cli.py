@@ -6,10 +6,19 @@ import argparse
 import sys
 
 from .aggregate import Aggregator
+from .enrich import ASNEnricher, CachingEnricher, Enricher, run_enrichers
 from .extract import MalformedPacket, extract_record
 from .formatters import format_csv, format_json, format_table
 from .models import IPStats, ParseSummary
 from .reader import CaptureError, open_capture
+
+
+def _build_enrichers(name: str | None) -> list[Enricher]:
+    if name is None:
+        return []
+    if name == "asn":
+        return [CachingEnricher(ASNEnricher())]
+    raise ValueError(f"Unknown enricher: {name}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -47,6 +56,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         default=None,
         help="Write output to FILE instead of stdout",
+    )
+    parser.add_argument(
+        "--enrich",
+        choices=("asn",),
+        default=None,
+        help="Enrich results with external metadata (currently: asn)",
     )
     return parser
 
@@ -89,6 +104,15 @@ def run(args: argparse.Namespace) -> int:
 
     if args.top is not None:
         stats = stats[: args.top]
+
+    # Enrichment runs after filtering and truncation — so we never make a
+    # network call for an IP the user asked us not to show.
+    try:
+        enrichers = _build_enrichers(args.enrich)
+    except ValueError as exc:
+        print(f"pcapscope: error: {exc}", file=sys.stderr)
+        return 1
+    run_enrichers(stats, enrichers)
 
     if args.format == "json":
         output = format_json(stats, summary)
