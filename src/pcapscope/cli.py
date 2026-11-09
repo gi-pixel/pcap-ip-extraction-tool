@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from .aggregate import Aggregator
-from .enrich import ASNEnricher, CachingEnricher, Enricher, run_enrichers
+from .enrich import ASNEnricher, CachingEnricher, Enricher, GeoEnricher, run_enrichers
 from .extract import MalformedPacket, extract_record
 from .formatters import format_csv, format_json, format_table
 from .models import IPStats, ParseSummary
@@ -18,8 +18,9 @@ def _build_enrichers(name: str | None) -> list[Enricher]:
         return []
     if name == "asn":
         return [CachingEnricher(ASNEnricher())]
+    if name == "geo":
+        return [CachingEnricher(GeoEnricher())]
     raise ValueError(f"Unknown enricher: {name}")
-
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -59,9 +60,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--enrich",
-        choices=("asn",),
+        choices=("asn", "geo"),
         default=None,
-        help="Enrich results with external metadata (currently: asn)",
+        help="Enrich results with external metadata (currently: asn, geo)",
     )
     return parser
 

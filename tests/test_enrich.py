@@ -74,3 +74,47 @@ def test_cli_without_enrich_has_empty_enriched(sample_pcap, capsys):
     parsed = json.loads(capsys.readouterr().out)
     for ip in parsed["ips"]:
         assert ip["enriched"] == {}
+
+def test_two_enrichers_merge_under_distinct_keys():
+    stats = [IPStats(ip="8.8.8.8")]
+    asn = FakeEnricher({"8.8.8.8": {"org": "Google"}})
+    asn.name = "asn"
+    geo = FakeEnricher({"8.8.8.8": {"country": "US"}})
+    geo.name = "geo"
+    run_enrichers(stats, [asn, geo])
+    assert stats[0].enriched == {
+        "asn": {"org": "Google"},
+        "geo": {"country": "US"},
+    }
+
+
+def test_geo_enricher_trims_fields(tmp_path):
+    # Serve a canned JSON document over file:// so the test never touches the net.
+    payload = tmp_path / "8.8.8.8.json"
+    payload.write_text(
+        '{"country":"US","region":"California","city":"Mountain View",'
+        '"loc":"37.4,-122.1","org":"Google","asn":"AS15169"}'
+    )
+    from pcapscope.enrich.geo import GeoEnricher
+
+    geo = GeoEnricher(url_template=f"file://{payload}")
+    assert geo.enrich("8.8.8.8") == {
+        "country": "US",
+        "region": "California",
+        "city": "Mountain View",
+        "loc": "37.4,-122.1",
+    }
+
+
+def test_cli_with_geo_enrich(sample_pcap, capsys, monkeypatch):
+    def fake_build(name):
+        if name == "geo":
+            return [CachingEnricher(FakeEnricher({"8.8.8.8": {"country": "US"}}))]
+        return []
+
+    monkeypatch.setattr(cli, "_build_enrichers", fake_build)
+    rc = cli.main([str(sample_pcap), "--format", "json", "--enrich", "geo"])
+    assert rc == 0
+    parsed = json.loads(capsys.readouterr().out)
+    by_ip = {ip["ip"]: ip for ip in parsed["ips"]}
+    assert by_ip["8.8.8.8"]["enriched"]["fake"] == {"country": "US"}
