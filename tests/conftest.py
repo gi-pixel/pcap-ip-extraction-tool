@@ -9,11 +9,10 @@ import pytest
 
 def _ipv4(src: bytes, dst: bytes, proto: int, payload: bytes = b"") -> bytes:
     total_len = 20 + len(payload)
-    header = struct.pack(
+    return struct.pack(
         "!BBHHHBBH4s4s",
         0x45, 0, total_len, 0, 0, 64, proto, 0, src, dst,
-    )
-    return header + payload
+    ) + payload
 
 
 def _ipv6(src: bytes, dst: bytes, nxt: int, payload: bytes = b"") -> bytes:
@@ -34,6 +33,8 @@ def _eth_vlan(vlan_id: int, ethertype: int, payload: bytes) -> bytes:
 
 
 def _pcap(packets: list[tuple[int, int, bytes]], linktype: int = 1) -> bytes:
+    # Little-endian pcap: magic as bytes D4 C3 B2 A1, rest of header and
+    # records written little-endian to match.
     out = struct.pack("<IHHIIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, linktype)
     for ts_sec, ts_usec, data in packets:
         out += struct.pack("<IIII", ts_sec, ts_usec, len(data), len(data))
@@ -46,24 +47,21 @@ def _pcapng(packets: list[tuple[int, int, bytes]], linktypes: list[int] | None =
         linktypes = [1]
 
     def block(block_type: int, body: bytes) -> bytes:
-        total = 12 + len(body)
         pad = (4 - (len(body) % 4)) % 4
         body = body + b"\x00" * pad
         total = 12 + len(body)
         return struct.pack("<II", block_type, total) + body + struct.pack("<I", total)
 
-    out = b""
-    # Section Header Block
+    # Section Header Block (little-endian): type, total_len, BOM, ver(2+2), sect_len(8)
     shb_body = struct.pack("<IHHq", 0x1A2B3C4D, 1, 0, -1)
-    out += block(0x0A0D0D0A, shb_body)
+    out = block(0x0A0D0D0A, shb_body)
 
-    # Interface Description Blocks
     for lt in linktypes:
         idb_body = struct.pack("<HHI", lt, 0, 65535)
         out += block(0x00000001, idb_body)
 
     for ts_sec, ts_usec, data in packets:
-        ts = (ts_sec * 1_000_000 + ts_usec)
+        ts = ts_sec * 1_000_000 + ts_usec
         epb_body = struct.pack("<IIIII", 0, ts >> 32, ts & 0xFFFFFFFF, len(data), len(data))
         epb_body += data
         out += block(0x00000006, epb_body)
@@ -74,6 +72,12 @@ def _pcapng(packets: list[tuple[int, int, bytes]], linktypes: list[int] | None =
 @pytest.fixture
 def fixtures_dir(tmp_path):
     return tmp_path
+
+
+@pytest.fixture
+def arp_packet() -> bytes:
+    """Raw Ethernet frame carrying an ARP payload (non-IP)."""
+    return _eth(0x0806, b"\x00" * 28)
 
 
 @pytest.fixture

@@ -23,11 +23,8 @@ def test_ipv4_and_ipv6(sample_pcap):
     assert "2001:db8::2" in addrs
 
 
-def test_arp_returns_none(fixtures_dir):
-    from tests.conftest import _eth, _pcap
-
-    arp = _eth(0x0806, b"\x00" * 28)
-    assert extract_record(0.0, arp, 1) is None
+def test_arp_returns_none(arp_packet):
+    assert extract_record(0.0, arp_packet, 1) is None
 
 
 def test_truncated_raises(sample_pcap):

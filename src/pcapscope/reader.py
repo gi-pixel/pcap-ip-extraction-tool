@@ -11,16 +11,21 @@ class CaptureError(Exception):
     """Raised for missing, empty, or unrecognized capture files."""
 
 
-# pcap magic numbers (both endiannesses), written as ints for clarity.
-_PCAP_MAGICS = {
-    0xA1B2C3D4,  # big-endian, microsecond
-    0xD4C3B2A1,  # little-endian, microsecond
-    0xA1B23C4D,  # big-endian, nanosecond
-    0x4D3CB2A1,  # little-endian, nanosecond
-}
-_PCAPNG_MAGIC = 0x0A0D0D0A
+# On-disk magic byte sequences. The pcap magic is deliberately asymmetric so a
+# reader can tell the file's byte order from the first 4 bytes:
+#   A1 B2 C3 D4  -> big-endian,    microsecond timestamps
+#   D4 C3 B2 A1  -> little-endian, microsecond timestamps
+#   A1 B2 3C 4D  -> big-endian,    nanosecond  timestamps
+#   4D 3C B2 A1  -> little-endian, nanosecond  timestamps
+_PCAP_MAGIC_BE_USEC = b"\xa1\xb2\xc3\xd4"
+_PCAP_MAGIC_LE_USEC = b"\xd4\xc3\xb2\xa1"
+_PCAP_MAGIC_BE_NSEC = b"\xa1\xb2\x3c\x4d"
+_PCAP_MAGIC_LE_NSEC = b"\x4d\x3c\xb2\xa1"
+_PCAPNG_MAGIC = b"\x0a\x0d\x0d\x0a"
+_PCAPNG_BOM_BE = b"\x1a\x2b\x3c\x4d"
+_PCAPNG_BOM_LE = b"\x4d\x3c\x2b\x1a"
 
-# Link types we care about (from pcap/pcapng linktype registry).
+# Link types we care about (pcap/pcapng linktype registry).
 LINKTYPE_NULL = 0
 LINKTYPE_ETHERNET = 1
 LINKTYPE_RAW = 101
@@ -59,17 +64,15 @@ def open_capture(path: str | Path) -> Iterator[Packet]:
     path = Path(path)
     head = _read_magic(path)
 
-    # Interpret as both endiannesses; if either matches a known magic, we know.
-    be_magic = struct.unpack(">I", head)[0]
-    le_magic = struct.unpack("<I", head)[0]
-
-    if be_magic in _PCAP_MAGICS:
-        big_endian = True
-        return _iter_pcap(path, head, big_endian)
-    if le_magic in _PCAP_MAGICS:
-        big_endian = False
-        return _iter_pcap(path, head, big_endian)
-    if be_magic == _PCAPNG_MAGIC or le_magic == _PCAPNG_MAGIC:
+    if head == _PCAP_MAGIC_BE_USEC:
+        return _iter_pcap(path, endian=">", nanosecond=False)
+    if head == _PCAP_MAGIC_LE_USEC:
+        return _iter_pcap(path, endian="<", nanosecond=False)
+    if head == _PCAP_MAGIC_BE_NSEC:
+        return _iter_pcap(path, endian=">", nanosecond=True)
+    if head == _PCAP_MAGIC_LE_NSEC:
+        return _iter_pcap(path, endian="<", nanosecond=True)
+    if head == _PCAPNG_MAGIC:
         return _iter_pcapng(path)
 
     raise CaptureError(
@@ -78,15 +81,7 @@ def open_capture(path: str | Path) -> Iterator[Packet]:
     )
 
 
-def _iter_pcap(path: Path, head: bytes, big_endian: bool) -> Iterator[Packet]:
-    endian = ">" if big_endian else "<"
-    magic = struct.unpack(f"{endian}I", head)[0]
-    if magic in (0xA1B23C4D, 0x4D3CB2A1):
-        # nanosecond-resolution pcap
-        nanosecond = True
-    else:
-        nanosecond = False
-
+def _iter_pcap(path: Path, endian: str, nanosecond: bool) -> Iterator[Packet]:
     with path.open("rb") as fh:
         header = fh.read(24)
         if len(header) < 24:
@@ -115,9 +110,6 @@ def _iter_pcap(path: Path, head: bytes, big_endian: bool) -> Iterator[Packet]:
 
 def _iter_pcapng(path: Path) -> Iterator[Packet]:
     """Parse a pcapng file, yielding packets with their per-interface linktype."""
-    # pcapng block header: block type (4), block total length (4), then body,
-    # then block total length (4) repeated. Endianness is determined by the
-    # byte-order magic in the SHB.
     with path.open("rb") as fh:
         endian = _pcapng_endian(fh, path)
         fh.seek(0)
@@ -144,7 +136,7 @@ def _iter_pcapng(path: Path) -> Iterator[Packet]:
             if block_type == 0x00000001:  # Interface Description Block
                 linktype = struct.unpack(f"{endian}H", body[:2])[0]
                 interfaces.append(linktype)
-                tsresol.append(_parse_tsresol(body))
+                tsresol.append(_parse_tsresol(body, endian))
             elif block_type == 0x00000006:  # Enhanced Packet Block
                 if len(interfaces) == 0:
                     raise CaptureError(
@@ -184,25 +176,25 @@ def _pcapng_endian(fh, path: Path) -> str:
     header = fh.read(12)
     if len(header) < 12:
         raise CaptureError(f"Truncated pcapng section header in {path}")
-    block_type = struct.unpack("<I", header[:4])[0]
-    if block_type != _PCAPNG_MAGIC:
+    if header[0:4] != _PCAPNG_MAGIC:
         raise CaptureError(f"Missing pcapng section header in {path}")
     bom = header[8:12]
-    if bom == b"\x1a\x2b\x3c\x4d":
+    if bom == _PCAPNG_BOM_LE:
         return "<"
-    if bom == b"\x4d\x3c\x2b\x1a":
+    if bom == _PCAPNG_BOM_BE:
         return ">"
     raise CaptureError(f"Invalid pcapng byte-order magic in {path}")
 
 
-def _parse_tsresol(body: bytes) -> int:
+def _parse_tsresol(body: bytes, endian: str) -> int:
     """Parse the if_tsresol option; return ticks per second (default 1e6)."""
     # IDB body layout: linktype(2) reserved(2) snaplen(4) options...
     if len(body) < 8:
         return 1_000_000
     offset = 8
+    option_struct = struct.Struct(f"{endian}HH")
     while offset + 4 <= len(body):
-        code, opt_len = struct.unpack("<HH", body[offset : offset + 4])
+        code, opt_len = option_struct.unpack(body[offset : offset + 4])
         if code == 0:  # opt_endofopt
             break
         opt_val = body[offset + 4 : offset + 4 + opt_len]
