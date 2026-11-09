@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import socket
+
 import dpkt
 
 from .models import PacketRecord
@@ -62,7 +64,6 @@ def _strip_link_layer(raw: bytes, linktype: int) -> bytes | None:
     if linktype in (0, 108):  # NULL / LOOP
         if len(raw) < 4:
             raise MalformedPacket("Truncated loopback header")
-        # 4-byte family field in host order; just trust the IP version nibble next.
         return raw[4:]
     if linktype == 101:  # RAW IP
         return raw
@@ -95,33 +96,36 @@ def _strip_ethernet(raw: bytes) -> bytes | None:
 def _extract_ipv4(timestamp: float, payload: bytes) -> PacketRecord:
     try:
         ip = dpkt.ip.IP(payload)
-        src = _ip_to_str(dpkt.ip.IP, ip.src)
-        dst = _ip_to_str(dpkt.ip.IP, ip.dst)
     except Exception as exc:  # dpkt raises various errors on bad input
         raise MalformedPacket(f"Malformed IPv4 packet: {exc}") from exc
 
-    if not isinstance(src, str) or not isinstance(dst, str):
-        raise MalformedPacket("Could not decode IPv4 addresses")
+    # Reject truncated packets: dpkt is lenient and will "parse" a one-byte
+    # payload as an IP with garbage length. Require the claimed total length
+    # to actually be present.
+    if ip.len < 20 or len(payload) < ip.len:
+        raise MalformedPacket(
+            f"Truncated IPv4 packet: header claims {ip.len} bytes, got {len(payload)}"
+        )
 
-    proto_num = ip.p
-    protocol = _PROTO_NAMES.get(proto_num, "OTHER")
-    length = len(payload)
-    return PacketRecord(timestamp, src, dst, protocol, length)
+    src = socket.inet_ntop(socket.AF_INET, ip.src)
+    dst = socket.inet_ntop(socket.AF_INET, ip.dst)
+    protocol = _PROTO_NAMES.get(ip.p, "OTHER")
+    return PacketRecord(timestamp, src, dst, protocol, ip.len)
 
 
 def _extract_ipv6(timestamp: float, payload: bytes) -> PacketRecord:
     try:
         ip6 = dpkt.ip6.IP6(payload)
-        src = str(dpkt.ip6.inet_ntop(dpkt.socket.AF_INET6, ip6.src))
-        dst = str(dpkt.ip6.inet_ntop(dpkt.socket.AF_INET6, ip6.dst))
     except Exception as exc:
         raise MalformedPacket(f"Malformed IPv6 packet: {exc}") from exc
 
-    proto_num = ip6.nxt
-    protocol = _PROTO_NAMES.get(proto_num, "OTHER")
-    length = len(payload)
-    return PacketRecord(timestamp, src, dst, protocol, length)
+    # IPv6 header is a fixed 40 bytes; payload length is the field after that.
+    if ip6.plen + 40 > len(payload):
+        raise MalformedPacket(
+            f"Truncated IPv6 packet: header claims {40 + ip6.plen} bytes, got {len(payload)}"
+        )
 
-
-def _ip_to_str(cls, addr_bytes: bytes) -> str:
-    return str(dpkt.ip.inet_ntop(dpkt.socket.AF_INET, addr_bytes))
+    src = socket.inet_ntop(socket.AF_INET6, ip6.src)
+    dst = socket.inet_ntop(socket.AF_INET6, ip6.dst)
+    protocol = _PROTO_NAMES.get(ip6.nxt, "OTHER")
+    return PacketRecord(timestamp, src, dst, protocol, 40 + ip6.plen)
