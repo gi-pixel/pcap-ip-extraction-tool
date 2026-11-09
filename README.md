@@ -21,4 +21,43 @@ pip install -e .
 - **`--top` with `--sort`**: honors the chosen sort then truncates; with default sort, it's "top N by total packets" as specified.
 - **Extensibility**: `enrich/` can later wrap `Aggregator` results before formatting; formatters and CLI take plain data, so nothing existing needs to change.
 
-One small thing worth flagging for your review: dpkt's `dpkt.socket` re-export is used for `inet_ntop`. If you'd rather avoid that implicit dependency, I can swap it for `socket.inet_ntop` from the stdlib — functionally identical and more explicit. Let me know and I'll adjust.git push -u origin main
+One small thing worth flagging for your review: dpkt's `dpkt.socket` re-export is used for `inet_ntop`. If you'd rather avoid that implicit dependency, I can swap it for `socket.inet_ntop` from the stdlib — functionally identical and more explicit. Let me know and I'll adjust.git push -u origin main.
+
+
+
+## Enrichment
+
+Enrichment runs **after** aggregation, **once per unique IP**, and is **off by
+default**. Enable with `--enrich asn`.
+
+### Adding an enricher
+
+Implement the `Enricher` protocol (`src/pcapscope/enrich/base.py`):
+
+```python
+class GeoEnricher:
+    name = "geo"                        # key under IPStats.enriched
+
+    def enrich(self, ip: str) -> dict | None:
+        ...
+
+
+
+## 2. The `bytes` column naming (still open from the last review)
+
+`format_table` and `format_csv` emit a column called `bytes` that is actually `total_bytes` (sent + received). Two acceptable resolutions:
+
+- **Keep it**, and add one line to the README: *"`bytes` = bytes_sent + bytes_received."*
+- **Split it** into `bytes_sent` and `bytes_received`, matching the JSON output.
+
+I lean toward keeping the collapsed column in the table (it's what a human scanning a report wants) and splitting it in CSV (what a script wants). That would be a small, defensible change to `format_csv` only — `test_formatters` still passes because it asserts `"8.8.8.8" in out`, not column count. Your call; either is spec-compliant as long as it's documented.
+
+## 3. `.gitattributes` on Windows
+
+You're editing on Windows and running on WSL. One CRLF regression on a `.py` file and `pytest` dies with a `SyntaxError` on line 1 that looks like a code bug but isn't. Prevent it once:
+
+```gitattributes
+* text=auto eol=lf
+*.pcap binary
+*.pcapng binary
+*.png binary
