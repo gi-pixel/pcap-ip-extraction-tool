@@ -47,7 +47,7 @@ def test_vlan_tagged(vlan_pcap):
 
 def test_snaplen_truncated_ipv4_is_counted(fixtures_dir):
     # A full 100-byte IP packet, but the capture only kept the first 34 bytes.
-        from helpers import _eth, _ipv4, _pcap  # see note below on imports
+    from helpers import _eth, _ipv4, _pcap  # see note below on imports
 
     full = _eth(0x0800, _ipv4(bytes([10, 0, 0, 1]), bytes([8, 8, 8, 8]), 6, b"\x00" * 80))
     truncated = full[:34]  # 14-byte Ethernet header + 20-byte IPv4 header, no payload
