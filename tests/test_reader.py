@@ -34,3 +34,24 @@ def test_unrecognized_format(tmp_path):
     p.write_bytes(b"NOTAPCAP")
     with pytest.raises(CaptureError, match="Unrecognized"):
         list(open_capture(p))
+
+def test_pcap_big_endian_usec(pcap_be_usec):
+    from pcapscope.reader import open_capture
+    pkts = list(open_capture(pcap_be_usec))
+    assert len(pkts) == 1
+    assert pkts[0].timestamp == pytest.approx(1_700_000_000.5)
+    assert pkts[0].linktype == 1
+
+
+def test_pcap_big_endian_nsec(pcap_be_nsec):
+    from pcapscope.reader import open_capture
+    pkts = list(open_capture(pcap_be_nsec))
+    assert len(pkts) == 1
+    assert pkts[0].timestamp == pytest.approx(1_700_000_000.5)
+
+
+def test_pcapng_big_endian(pcapng_be):
+    from pcapscope.reader import open_capture
+    pkts = list(open_capture(pcapng_be))
+    assert len(pkts) == 1
+    assert pkts[0].linktype == 1

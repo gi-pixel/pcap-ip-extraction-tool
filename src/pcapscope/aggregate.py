@@ -33,16 +33,18 @@ class Aggregator:
             # Classification computed once per unique IP.
             stats = IPStats(
                 ip=ip,
-                first_seen=float("inf"),
-                last_seen=float("-inf"),
+                first_seen=None,
+                last_seen=None,
                 scope=classify_ip(ip),
             )
             self._stats[ip] = stats
         return stats
 
 
-def _touch(stats: IPStats, ts: float) -> None:
-    if ts < stats.first_seen:
+def _touch(stats: IPStats, ts: float | None) -> None:
+    if ts is None:
+        return
+    if stats.first_seen is None or ts < stats.first_seen:
         stats.first_seen = ts
-    if ts > stats.last_seen:
+    if stats.last_seen is None or ts > stats.last_seen:
         stats.last_seen = ts

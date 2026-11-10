@@ -33,3 +33,14 @@ def test_first_last_seen():
     stats = {s.ip: s for s in agg.results()}["8.8.8.8"]
     assert stats.first_seen == 1.0
     assert stats.last_seen == 9.0
+
+def test_spb_timestamp_does_not_affect_first_last_seen():
+    from pcapscope.aggregate import Aggregator
+    from pcapscope.models import PacketRecord
+    # Simulate what the CLI does with an SPB-derived Packet (timestamp=None).
+    agg = Aggregator()
+    agg.add(PacketRecord(100.0, "8.8.8.8", "1.1.1.1", "TCP", 10))
+    agg.add(PacketRecord(None, "8.8.8.8", "1.1.1.1", "TCP", 10))  # type: ignore[arg-type]
+    stats = {s.ip: s for s in agg.results()}["8.8.8.8"]
+    assert stats.first_seen == 100.0
+    assert stats.last_seen == 100.0

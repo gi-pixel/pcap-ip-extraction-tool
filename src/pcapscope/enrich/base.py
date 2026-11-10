@@ -1,12 +1,9 @@
-"""Enricher protocol, caching wrapper, and the run loop.
-
-An enricher takes an IP string and returns a dict of metadata (or None if it
-has nothing to say). The pipeline calls each enricher once per unique IP, after
-aggregation and before formatting.
-"""
+"""Enricher protocol, caching wrapper, and the run loop."""
 
 from __future__ import annotations
 
+import sys
+import urllib.error
 from typing import Any, Iterable, Protocol, runtime_checkable
 
 from ..models import IPStats
@@ -14,27 +11,17 @@ from ..models import IPStats
 
 @runtime_checkable
 class Enricher(Protocol):
-    """Structural interface for an enricher.
-
-    Implementations only need a `name` attribute and an `enrich(ip)` method.
-    """
-
     name: str
+    service: str
 
     def enrich(self, ip: str) -> dict[str, Any] | None: ...
 
 
 class CachingEnricher:
-    """Wrap an enricher so each IP is looked up at most once per run.
-
-    The cache is per-instance, so a fresh CachingEnricher per CLI invocation
-    means no cross-run leakage. Memory scales with unique IPs, matching the
-    aggregator's discipline.
-    """
-
     def __init__(self, inner: Enricher) -> None:
         self._inner = inner
         self.name = inner.name
+        self.service = getattr(inner, "service", inner.name)
         self._cache: dict[str, dict[str, Any] | None] = {}
 
     def enrich(self, ip: str) -> dict[str, Any] | None:
@@ -43,24 +30,58 @@ class CachingEnricher:
         return self._cache[ip]
 
 
-def run_enrichers(stats: Iterable[IPStats], enrichers: Iterable[Enricher]) -> None:
-    """Mutate each IPStats in place, merging each enricher's output under its name.
+def _is_systemic(exc: BaseException) -> bool:
+    """True if the error should abort remaining lookups."""
+    if isinstance(exc, urllib.error.HTTPError):
+        code = exc.code
+        return code in (401, 403, 429) or 500 <= code < 600
+    if isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError)):
+        return True
+    return False
 
-    Enricher failures are non-fatal: an exception from one enricher is caught
-    and recorded as {"error": "..."} so a network blip doesn't lose the rest
-    of the report. The enricher's output for that IP is still a dict, so
-    formatters see a uniform shape.
-    """
+
+def run_enrichers(stats: Iterable[IPStats], enrichers: Iterable[Enricher]) -> None:
+    """Mutate each IPStats in place, merging each enricher's output under its name."""
     enrichers = list(enrichers)
     if not enrichers:
         return
 
-    for stat in stats:
-        for enricher in enrichers:
+    stats = list(stats)
+    total = len(stats)
+    for enricher in enrichers:
+        service = getattr(enricher, "service", enricher.name)
+        print(
+            f"pcapscope: enriching {total} IPs via {service}",
+            file=sys.stderr,
+        )
+
+    for enricher in enrichers:
+        service = getattr(enricher, "service", enricher.name)
+        done = 0
+        aborted = False
+        abort_reason = ""
+        for stat in stats:
+            if aborted:
+                break
             try:
                 result = enricher.enrich(stat.ip)
-            except Exception as exc:  # network, JSON, rate limit — all non-fatal
+            except Exception as exc:
+                if _is_systemic(exc):
+                    stat.enriched[enricher.name] = {"error": str(exc)}
+                    aborted = True
+                    abort_reason = str(exc)
+                    break
+                # Per-IP error (e.g. 404): record on this IP, continue.
                 stat.enriched[enricher.name] = {"error": str(exc)}
+                done += 1
                 continue
             if result:
                 stat.enriched[enricher.name] = result
+            done += 1
+
+        if aborted:
+            print(
+                f"pcapscope: enrichment stopped after {done} of {total} IPs "
+                f"via {service}: {abort_reason}",
+                file=sys.stderr,
+            )

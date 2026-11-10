@@ -34,7 +34,7 @@ LINKTYPE_LINUX_SLL = 113
 
 
 class Packet(NamedTuple):
-    timestamp: float
+    timestamp: float | None
     raw_bytes: bytes
     linktype: int
 
@@ -133,6 +133,25 @@ def _iter_pcapng(path: Path) -> Iterator[Packet]:
             # trailing total length is the last 4 bytes of body
             body = body[:-4]
 
+            if block_type == 0x0A0D0D0A:  # Section Header Block
+                # A new SHB begins a new section: interface state is reset and
+                # the section's byte order may differ from the previous one.
+                # The header we just read was decoded with the *old* endian,
+                # so re-derive endian from this SHB's byte-order magic before
+                # reading the next block header.
+                if len(body) < 4:
+                    raise CaptureError(f"Short pcapng SHB in {path}")
+                bom = body[0:4]
+                if bom == _PCAPNG_BOM_LE:
+                    endian = "<"
+                elif bom == _PCAPNG_BOM_BE:
+                    endian = ">"
+                else:
+                    raise CaptureError(f"Invalid pcapng SHB byte-order magic in {path}")
+                interfaces = []
+                tsresol = []
+                block_hdr = struct.Struct(f"{endian}II")
+                continue
             if block_type == 0x00000001:  # Interface Description Block
                 linktype = struct.unpack(f"{endian}H", body[:2])[0]
                 interfaces.append(linktype)
@@ -166,10 +185,10 @@ def _iter_pcapng(path: Path) -> Iterator[Packet]:
                     raise CaptureError(f"Short pcapng SPB in {path}")
                 orig_len = struct.unpack(f"{endian}I", body[:4])[0]
                 data = body[4 : 4 + orig_len]
-                # SPB has no timestamp; use 0.0
-                yield Packet(0.0, data, interfaces[0])
-            # Other block types (SHB, NRB, ISB, etc.) are skipped.
-
+                # SPB has no timestamp. Yield None so the aggregator can skip
+                # it for first_seen / last_seen.
+                yield Packet(None, data, interfaces[0])
+            # Other block types (NRB, ISB, etc.) are skipped.
 
 def _pcapng_endian(fh, path: Path) -> str:
     """Read the Section Header Block byte-order magic and return struct endian."""

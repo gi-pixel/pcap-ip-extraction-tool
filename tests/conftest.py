@@ -41,6 +41,36 @@ def _pcap(packets: list[tuple[int, int, bytes]], linktype: int = 1) -> bytes:
         out += data
     return out
 
+def _pcap_be(packets, linktype=1, nanosecond=False):
+    magic = 0xA1B23C4D if nanosecond else 0xA1B2C3D4
+    out = struct.pack(">IHHIIII", magic, 2, 4, 0, 0, 65535, linktype)
+    for ts_sec, ts_frac, data in packets:
+        out += struct.pack(">IIII", ts_sec, ts_frac, len(data), len(data))
+        out += data
+    return out
+
+
+def _pcapng_be(packets, linktypes=None):
+    if linktypes is None:
+        linktypes = [1]
+
+    def block(block_type, body):
+        pad = (4 - (len(body) % 4)) % 4
+        body = body + b"\x00" * pad
+        total = 12 + len(body)
+        return struct.pack(">II", block_type, total) + body + struct.pack(">I", total)
+
+    shb_body = struct.pack(">IHHq", 0x1A2B3C4D, 1, 0, -1)
+    out = block(0x0A0D0D0A, shb_body)
+    for lt in linktypes:
+        out += block(0x00000001, struct.pack(">HHI", lt, 0, 65535))
+    for ts_sec, ts_usec, data in packets:
+        ts = ts_sec * 1_000_000 + ts_usec
+        epb = struct.pack(">IIIII", 0, ts >> 32, ts & 0xFFFFFFFF, len(data), len(data))
+        epb += data
+        out += block(0x00000006, epb)
+    return out
+
 
 def _pcapng(packets: list[tuple[int, int, bytes]], linktypes: list[int] | None = None) -> bytes:
     if linktypes is None:
@@ -133,4 +163,27 @@ def vlan_pcap(fixtures_dir):
     )
     path = fixtures_dir / "vlan.pcap"
     path.write_bytes(_pcap([(1_700_000_000, 0, ipv4)]))
+    return path
+
+@pytest.fixture
+def pcap_be_usec(fixtures_dir):
+    ipv4 = _eth(0x0800, _ipv4(bytes([10, 0, 0, 1]), bytes([8, 8, 8, 8]), 6, b"\x00" * 20))
+    path = fixtures_dir / "be_usec.pcap"
+    path.write_bytes(_pcap_be([(1_700_000_000, 500_000, ipv4)]))
+    return path
+
+
+@pytest.fixture
+def pcap_be_nsec(fixtures_dir):
+    ipv4 = _eth(0x0800, _ipv4(bytes([10, 0, 0, 1]), bytes([8, 8, 8, 8]), 6, b"\x00" * 20))
+    path = fixtures_dir / "be_nsec.pcap"
+    path.write_bytes(_pcap_be([(1_700_000_000, 500_000_000, ipv4)], nanosecond=True))
+    return path
+
+
+@pytest.fixture
+def pcapng_be(fixtures_dir):
+    ipv4 = _eth(0x0800, _ipv4(bytes([10, 0, 0, 1]), bytes([8, 8, 8, 8]), 6, b"\x00" * 20))
+    path = fixtures_dir / "be.pcapng"
+    path.write_bytes(_pcapng_be([(1_700_000_000, 0, ipv4)]))
     return path

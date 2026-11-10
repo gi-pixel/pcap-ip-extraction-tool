@@ -26,8 +26,8 @@ class IPStats:
     packets_received: int = 0
     bytes_sent: int = 0
     bytes_received: int = 0
-    first_seen: float = 0.0
-    last_seen: float = 0.0
+    first_seen: float | None = None
+    last_seen: float | None = None
     scope: str = ""
     enriched: dict[str, Any] = field(default_factory=dict)
 

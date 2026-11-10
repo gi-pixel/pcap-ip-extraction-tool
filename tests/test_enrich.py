@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 
 import pytest
+import urllib.error
+
 
 from pcapscope import cli
 from pcapscope.enrich import CachingEnricher, Enricher, run_enrichers
 from pcapscope.models import IPStats
+
 
 
 class FakeEnricher:

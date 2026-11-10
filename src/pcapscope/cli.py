@@ -7,7 +7,7 @@ import sys
 
 from .aggregate import Aggregator
 from .enrich import ASNEnricher, CachingEnricher, Enricher, GeoEnricher, run_enrichers
-from .extract import MalformedPacket, extract_record
+from .extract import MalformedPacket, extract_record, UnsupportedLinktype
 from .formatters import format_csv, format_json, format_table
 from .models import IPStats, ParseSummary
 from .reader import CaptureError, open_capture
@@ -21,6 +21,15 @@ def _build_enrichers(name: str | None) -> list[Enricher]:
     if name == "geo":
         return [CachingEnricher(GeoEnricher())]
     raise ValueError(f"Unknown enricher: {name}")
+
+def _positive_int(value: str) -> int:
+    try:
+        n = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid int: {value!r}") from exc
+    if n <= 0:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got {n}")
+    return n
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -41,7 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--top",
-        type=int,
+        type=_positive_int
         metavar="N",
         default=None,
         help="Show only the top N IPs (by total packets unless --sort says otherwise)",
@@ -72,7 +81,7 @@ def _sort_key(stat: IPStats, sort: str):
         return stat.total_packets
     if sort == "bytes":
         return stat.total_bytes
-    return stat.first_seen
+    return stat.first_seen if stat.first_seen is not None else float("-inf")
 
 
 def run(args: argparse.Namespace) -> int:
@@ -84,6 +93,16 @@ def run(args: argparse.Namespace) -> int:
             summary.total_packets += 1
             try:
                 record = extract_record(packet.timestamp, packet.raw_bytes, packet.linktype)
+            except UnsupportedLinktype as exc:
+                _LINKTYPE_NAMES = {276: "Linux cooked v2"}
+                hint = _LINKTYPE_NAMES.get(exc.linktype)
+                hint_str = f" ({hint})" if hint else ""
+                print(
+                    f"pcapscope: error: unsupported link type "
+                    f"{exc.linktype}{hint_str}",
+                    file=sys.stderr,
+                )
+                return 1
             except MalformedPacket:
                 summary.skipped_malformed += 1
                 continue
@@ -101,7 +120,10 @@ def run(args: argparse.Namespace) -> int:
     if args.public_only:
         stats = [s for s in stats if s.scope == "public"]
 
-    stats.sort(key=lambda s: _sort_key(s, args.sort), reverse=(args.sort != "first_seen"))
+        if args.sort == "first_seen":
+        stats.sort(key=lambda s: (s.first_seen, s.ip))
+    else:
+        stats.sort(key=lambda s: (_sort_key(s, args.sort), s.ip), reverse=True)
 
     if args.top is not None:
         stats = stats[: args.top]
@@ -124,7 +146,7 @@ def run(args: argparse.Namespace) -> int:
 
     if args.output:
         try:
-            with open(args.output, "w", encoding="utf-8") as fh:
+            with open(args.output, "w", encoding="utf-8", newline="") as fh:
                 fh.write(output)
                 if not output.endswith("\n"):
                     fh.write("\n")
@@ -132,7 +154,14 @@ def run(args: argparse.Namespace) -> int:
             print(f"pcapscope: error: could not write {args.output}: {exc}", file=sys.stderr)
             return 1
     else:
-        print(output)
+        try:
+            print(output)
+        except BrokenPipeError:
+            try:
+                sys.stdout.close()
+            except Exception:
+                pass
+            return 0
 
     return 0
 

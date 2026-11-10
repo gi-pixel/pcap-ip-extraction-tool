@@ -61,3 +61,20 @@ You're editing on Windows and running on WSL. One CRLF regression on a `.py` fil
 *.pcap binary
 *.pcapng binary
 *.png binary
+
+
+### Scopes
+
+| Scope | Covers | Included in `--public-only` / `--enrich` |
+|---|---|---|
+| `public` | Globally routable addresses | Yes |
+| `private` | RFC1918 (`10/8`, `172.16/12`, `192.168/16`) and `fc00::/7` | No |
+| `shared` | CGNAT `100.64.0.0/10` | No |
+| `loopback` | `127.0.0.0/8`, `::1` | No |
+| `link_local` | `169.254.0.0/16`, `fe80::/10` | No |
+| `multicast` | `224.0.0.0/4`, `ff00::/8` | No |
+| `reserved` | Everything else not globally routable (documentation, benchmarking, IETF protocol blocks, unspecified) | No |
+
+CGNAT addresses (`100.64.0.0/10`) are labelled `shared` and excluded from both
+`--public-only` and `--enrich`. IPv4-mapped IPv6 addresses (`::ffff:a.b.c.d`)
+are classified by their embedded IPv4 address.

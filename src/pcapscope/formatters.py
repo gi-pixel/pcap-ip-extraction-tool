@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 from .models import IPStats, ParseSummary
 
 
-def _fmt_ts(ts: float) -> str:
-    if ts == float("inf") or ts == float("-inf"):
+def _fmt_ts(ts: float | None) -> str:
+    if ts is None:
         return "n/a"
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 

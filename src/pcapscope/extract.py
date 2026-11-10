@@ -25,6 +25,12 @@ _SUPPORTED_LINKTYPES = {
     113,  # Linux SLL
 }
 
+class UnsupportedLinktype(Exception):
+    """Raised when the capture's link type is not supported."""
+
+    def __init__(self, linktype: int) -> None:
+        self.linktype = linktype
+        super().__init__(f"unsupported link type {linktype}")
 
 class MalformedPacket(Exception):
     """Raised when a packet's bytes cannot be parsed."""
@@ -40,11 +46,13 @@ def extract_record(
     them without crashing.
     """
     if linktype not in _SUPPORTED_LINKTYPES:
-        raise MalformedPacket(f"Unsupported link type {linktype}")
+        raise UnsupportedLinktype(linktype)
 
     payload = _strip_link_layer(raw_bytes, linktype)
     if payload is None:
         return None
+    if not payload:
+        raise MalformedPacket("Empty IP payload after link-layer strip")
 
     version = payload[0] >> 4
     if version == 4:
@@ -94,38 +102,68 @@ def _strip_ethernet(raw: bytes) -> bytes | None:
 
 
 def _extract_ipv4(timestamp: float, payload: bytes) -> PacketRecord:
+    captured = len(payload)
+
+    # Header-only checks first. These reject genuinely corrupt packets, not
+    # snaplen-truncated ones.
+    if captured < 20:
+        raise MalformedPacket(
+            f"IPv4 packet too short for header: {captured} bytes"
+        )
+    ihl = (payload[0] & 0x0F) * 4
+    if ihl < 20:
+        raise MalformedPacket(f"IPv4 IHL below minimum: {ihl} bytes")
+    if ihl > captured:
+        raise MalformedPacket(
+            f"IPv4 header length {ihl} exceeds captured {captured} bytes"
+        )
+
     try:
         ip = dpkt.ip.IP(payload)
-    except Exception as exc:  # dpkt raises various errors on bad input
+    except Exception as exc:
         raise MalformedPacket(f"Malformed IPv4 packet: {exc}") from exc
 
-    # Reject truncated packets: dpkt is lenient and will "parse" a one-byte
-    # payload as an IP with garbage length. Require the claimed total length
-    # to actually be present.
-    if ip.len < 20 or len(payload) < ip.len:
+    total_len = ip.len
+    # Total length 0 is valid: TCP segmentation offload on the sending host
+    # leaves the field at 0 and fills it in later (Wireshark warns on this).
+    # In that case, fall back to the captured length.
+    if total_len == 0:
+        byte_count = captured
+    elif total_len < ihl:
         raise MalformedPacket(
-            f"Truncated IPv4 packet: header claims {ip.len} bytes, got {len(payload)}"
+            f"IPv4 total length {total_len} below header length {ihl}"
         )
+    else:
+        # Snaplen truncation is normal; do not reject when captured < total_len.
+        byte_count = total_len
 
     src = socket.inet_ntop(socket.AF_INET, ip.src)
     dst = socket.inet_ntop(socket.AF_INET, ip.dst)
     protocol = _PROTO_NAMES.get(ip.p, "OTHER")
-    return PacketRecord(timestamp, src, dst, protocol, ip.len)
+    return PacketRecord(timestamp, src, dst, protocol, byte_count)
 
 
 def _extract_ipv6(timestamp: float, payload: bytes) -> PacketRecord:
+    captured = len(payload)
+    if captured < 40:
+        raise MalformedPacket(
+            f"IPv6 packet too short for header: {captured} bytes"
+        )
+
     try:
         ip6 = dpkt.ip6.IP6(payload)
     except Exception as exc:
         raise MalformedPacket(f"Malformed IPv6 packet: {exc}") from exc
 
-    # IPv6 header is a fixed 40 bytes; payload length is the field after that.
-    if ip6.plen + 40 > len(payload):
-        raise MalformedPacket(
-            f"Truncated IPv6 packet: header claims {40 + ip6.plen} bytes, got {len(payload)}"
-        )
+    plen = ip6.plen
+    # plen == 0 means either a zero-payload packet or a jumbogram whose real
+    # length is in a Hop-by-Hop Jumbo Payload option. In both cases, use the
+    # captured length. Snaplen truncation is not an error.
+    byte_count = 40 + plen if plen > 0 else captured
 
     src = socket.inet_ntop(socket.AF_INET6, ip6.src)
     dst = socket.inet_ntop(socket.AF_INET6, ip6.dst)
-    protocol = _PROTO_NAMES.get(ip6.nxt, "OTHER")
-    return PacketRecord(timestamp, src, dst, protocol, 40 + ip6.plen)
+    # ip6.p is the protocol after walking extension headers; ip6.nxt is only
+    # the first next-header value.
+    protocol = _PROTO_NAMES.get(ip6.p, "OTHER")
+    return PacketRecord(timestamp, src, dst, protocol, byte_count)

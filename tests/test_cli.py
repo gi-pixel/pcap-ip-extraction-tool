@@ -47,3 +47,28 @@ def test_cli_output_file(sample_pcap, tmp_path, capsys):
     rc = main([str(sample_pcap), "--output", str(out)])
     assert rc == 0
     assert "8.8.8.8" in out.read_text()
+
+def test_cli_unsupported_linktype_exits_once(fixtures_dir, capsys):
+    import struct
+    # Minimal pcap with linktype 276, one packet.
+    data = b"\x00" * 50
+    pcap = struct.pack("<IHHIIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 276)
+    pcap += struct.pack("<IIII", 1_700_000_000, 0, len(data), len(data)) + data
+    path = fixtures_dir / "sll2.pcap"
+    path.write_bytes(pcap)
+
+    from pcapscope.cli import main
+    rc = main([str(path)])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "unsupported link type 276" in err
+    assert "Linux cooked v2" in err
+    assert "skipped (malformed)" not in capsys.readouterr().out
+
+def test_cli_top_rejects_zero_and_negative(sample_pcap, capsys):
+    from pcapscope.cli import main
+    import pytest
+    with pytest.raises(SystemExit):
+        main([str(sample_pcap), "--top", "0"])
+    with pytest.raises(SystemExit):
+        main([str(sample_pcap), "--top", "-3"])
