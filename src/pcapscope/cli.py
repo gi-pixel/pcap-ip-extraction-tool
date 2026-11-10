@@ -50,7 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--top",
-        type=_positive_int
+        type=_positive_int,
         metavar="N",
         default=None,
         help="Show only the top N IPs (by total packets unless --sort says otherwise)",
