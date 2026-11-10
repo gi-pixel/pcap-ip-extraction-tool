@@ -73,8 +73,16 @@ You're editing on Windows and running on WSL. One CRLF regression on a `.py` fil
 | `loopback` | `127.0.0.0/8`, `::1` | No |
 | `link_local` | `169.254.0.0/16`, `fe80::/10` | No |
 | `multicast` | `224.0.0.0/4`, `ff00::/8` | No |
-| `reserved` | Everything else not globally routable (documentation, benchmarking, IETF protocol blocks, unspecified) | No |
+| `reserved` | Everything else not globally routable | No |
 
-CGNAT addresses (`100.64.0.0/10`) are labelled `shared` and excluded from both
-`--public-only` and `--enrich`. IPv4-mapped IPv6 addresses (`::ffff:a.b.c.d`)
-are classified by their embedded IPv4 address.
+CGNAT addresses are labelled `shared` and excluded from both `--public-only`
+and `--enrich`. IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is classified by its
+embedded IPv4 address.
+
+### Byte accounting
+
+The `ip bytes` column is the sum of IP total-length fields — IP bytes, not
+frame bytes. It excludes the Ethernet header (14 bytes), any VLAN tag, and
+Ethernet padding. To compare against `tshark -z endpoints` or Wireshark's
+Statistics → Endpoints, add `14 × packets` (plus VLAN tags and padding where
+present); the figures will then match.

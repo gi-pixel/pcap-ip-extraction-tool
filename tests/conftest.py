@@ -13,6 +13,7 @@ from helpers import (
     _pcap_be,
     _pcapng,
     _pcapng_be,
+    _pcapng_multi_section,
 )
 
 
@@ -104,4 +105,16 @@ def pcapng_be(fixtures_dir):
     ipv4 = _eth(0x0800, _ipv4(bytes([10, 0, 0, 1]), bytes([8, 8, 8, 8]), 6, b"\x00" * 20))
     path = fixtures_dir / "be.pcapng"
     path.write_bytes(_pcapng_be([(1_700_000_000, 0, ipv4)]))
+    return path
+
+@pytest.fixture
+def pcapng_multi_section(fixtures_dir):
+    """Two-section pcapng with different linktypes; exercises the SHB-reset branch."""
+    eth_pkt = _eth(0x0800, _ipv4(bytes([10, 0, 0, 1]), bytes([8, 8, 8, 8]), 6, b"\x00" * 20))
+    raw_pkt = _ipv4(bytes([10, 0, 0, 2]), bytes([1, 1, 1, 1]), 17, b"\x00" * 8)
+    path = fixtures_dir / "multi_linktype.pcapng"
+    path.write_bytes(_pcapng_multi_section([
+        ([1],   [(1_700_000_000, 0, eth_pkt)]),
+        ([101], [(1_700_000_001, 0, raw_pkt)]),
+    ]))
     return path

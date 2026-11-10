@@ -17,7 +17,7 @@ def _fmt_ts(ts: float | None) -> str:
 
 
 def format_table(stats: list[IPStats], summary: ParseSummary) -> str:
-    headers = ["IP", "scope", "sent", "received", "bytes", "first seen", "last seen"]
+    headers = ["IP", "scope", "sent", "received", "ip bytes", "first seen", "last seen"]
     rows = [
         [
             s.ip,
@@ -48,12 +48,11 @@ def format_table(stats: list[IPStats], summary: ParseSummary) -> str:
 
 def _summary_lines(summary: ParseSummary) -> list[str]:
     return [
-        f"total packets:      {summary.total_packets}",
-        f"ip packets:         {summary.ip_packets}",
-        f"skipped (non-ip):   {summary.skipped_non_ip}",
-        f"skipped (malformed):{summary.skipped_malformed}",
+        f"total packets:       {summary.total_packets}",
+        f"ip packets:          {summary.ip_packets}",
+        f"skipped (non-ip):    {summary.skipped_non_ip}",
+        f"skipped (malformed): {summary.skipped_malformed}",
     ]
-
 
 def format_json(stats: list[IPStats], summary: ParseSummary) -> str:
     payload = {
@@ -89,7 +88,7 @@ def format_csv(stats: list[IPStats], summary: ParseSummary) -> str:
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(
-        ["ip", "scope", "packets_sent", "packets_received", "bytes",
+        ["ip", "scope", "packets_sent", "packets_received", "ip_bytes",
          "first_seen", "last_seen"]
     )
     for s in stats:

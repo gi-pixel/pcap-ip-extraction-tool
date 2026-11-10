@@ -55,3 +55,21 @@ def test_pcapng_big_endian(pcapng_be):
     pkts = list(open_capture(pcapng_be))
     assert len(pkts) == 1
     assert pkts[0].linktype == 1
+
+def test_pcapng_multi_section_resets_interfaces(pcapng_multi_section):
+    """A new SHB must reset interface state; section 2's linktype differs from
+    section 1's, so a failure to reset would parse section 2's packet wrongly."""
+    from pcapscope.reader import open_capture
+    from pcapscope.extract import extract_record
+
+    packets = list(open_capture(pcapng_multi_section))
+    assert len(packets) == 2
+    assert packets[0].linktype == 1
+    assert packets[1].linktype == 101
+
+    rec0 = extract_record(packets[0].timestamp, packets[0].raw_bytes, packets[0].linktype)
+    rec1 = extract_record(packets[1].timestamp, packets[1].raw_bytes, packets[1].linktype)
+    assert rec0 is not None and rec0.src_ip == "10.0.0.1"
+    assert rec1 is not None and rec1.src_ip == "10.0.0.2"
+    assert packets[0].timestamp == pytest.approx(1_700_000_000.0)
+    assert packets[1].timestamp == pytest.approx(1_700_000_001.0)

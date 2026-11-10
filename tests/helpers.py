@@ -112,3 +112,25 @@ def _pcapng_be(
         epb += data
         out += block(0x00000006, epb)
     return out
+
+def _pcapng_multi_section(
+    sections: list[tuple[list[int], list[tuple[int, int, bytes]]]],
+) -> bytes:
+    """Build a pcapng with multiple sections, each with its own SHB, IDBs, and EPBs."""
+    def block(block_type: int, body: bytes) -> bytes:
+        pad = (4 - (len(body) % 4)) % 4
+        body = body + b"\x00" * pad
+        total = 12 + len(body)
+        return struct.pack("<II", block_type, total) + body + struct.pack("<I", total)
+
+    out = b""
+    for linktypes, packets in sections:
+        out += block(0x0A0D0D0A, struct.pack("<IHHq", 0x1A2B3C4D, 1, 0, -1))
+        for lt in linktypes:
+            out += block(0x00000001, struct.pack("<HHI", lt, 0, 65535))
+        for ts_sec, ts_usec, data in packets:
+            ts = ts_sec * 1_000_000 + ts_usec
+            epb = struct.pack("<IIIII", 0, ts >> 32, ts & 0xFFFFFFFF, len(data), len(data))
+            epb += data
+            out += block(0x00000006, epb)
+    return out
