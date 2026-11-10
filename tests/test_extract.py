@@ -47,7 +47,7 @@ def test_vlan_tagged(vlan_pcap):
 
 def test_snaplen_truncated_ipv4_is_counted(fixtures_dir):
     # A full 100-byte IP packet, but the capture only kept the first 34 bytes.
-    from tests.conftest import _eth, _ipv4, _pcap  # see note below on imports
+        from helpers import _eth, _ipv4, _pcap  # see note below on imports
 
     full = _eth(0x0800, _ipv4(bytes([10, 0, 0, 1]), bytes([8, 8, 8, 8]), 6, b"\x00" * 80))
     truncated = full[:34]  # 14-byte Ethernet header + 20-byte IPv4 header, no payload
@@ -66,7 +66,7 @@ def test_snaplen_truncated_ipv4_is_counted(fixtures_dir):
 
 def test_ipv4_length_zero_uses_captured(fixtures_dir):
     # TSO case: total-length field is 0 on the wire.
-    from tests.conftest import _eth, _pcap
+    from helpers import _eth, _pcap
     import struct
 
     payload = b"\x00" * 80
@@ -90,7 +90,7 @@ def test_ipv4_length_zero_uses_captured(fixtures_dir):
 
 def test_ethernet_padding_uses_ip_length(fixtures_dir):
     # 20-byte IP header, no payload; Ethernet pads the frame to 60 bytes.
-    from tests.conftest import _eth, _ipv4, _pcap
+    from helpers import _eth, _ipv4, _pcap
     payload = _ipv4(bytes([10, 0, 0, 1]), bytes([8, 8, 8, 8]), 6, b"")
     frame = _eth(0x0800, payload)
     assert len(frame) < 60  # confirms padding is needed
@@ -107,7 +107,7 @@ def test_ethernet_padding_uses_ip_length(fixtures_dir):
 
 
 def test_ipv4_length_below_header_is_malformed(fixtures_dir):
-    from tests.conftest import _eth, _pcap
+    from helpers import _eth, _pcap
     import struct
 
     ip_hdr = struct.pack(
@@ -130,7 +130,7 @@ def test_ipv4_length_below_header_is_malformed(fixtures_dir):
 
 def test_ipv6_plen_zero_with_extra_bytes_uses_captured(fixtures_dir):
     # plen=0 but extra bytes present: use captured length, not 40.
-    from tests.conftest import _eth, _pcap
+    from helpers import _eth, _pcap
     import struct
 
     extra = b"\x00" * 30
@@ -153,7 +153,7 @@ def test_ipv6_plen_zero_with_extra_bytes_uses_captured(fixtures_dir):
 
 
 def test_ipv6_plen_zero_exactly_40_bytes(fixtures_dir):
-    from tests.conftest import _eth, _pcap
+    from helpers import _eth, _pcap
     import struct
 
     ip6_hdr = struct.pack(
