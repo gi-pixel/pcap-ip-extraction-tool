@@ -120,7 +120,7 @@ def run(args: argparse.Namespace) -> int:
     if args.public_only:
         stats = [s for s in stats if s.scope == "public"]
 
-        if args.sort == "first_seen":
+    if args.sort == "first_seen":
         stats.sort(key=lambda s: (s.first_seen, s.ip))
     else:
         stats.sort(key=lambda s: (_sort_key(s, args.sort), s.ip), reverse=True)
