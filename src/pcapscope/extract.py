@@ -197,9 +197,7 @@ def _extract_ipv6(timestamp: float, payload: bytes) -> PacketRecord:
 
 def _is_non_first_fragment(ip: "dpkt.ip.IP") -> bool:
     """True if this IPv4 packet is a fragment and not the first fragment."""
-    # IPv4 flags: bit 0 (0x1) = MF, bit 1 (0x2) = DF.
-    # If fragment offset > 0, this is not the first fragment: no transport header.
-    return bool(ip.off & 0x1FFF)
+    return ip.offset > 0
 
 
 def _read_transport_ports(payload: bytes, offset: int) -> tuple[int, int] | None:

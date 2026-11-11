@@ -19,7 +19,9 @@ def _fmt_ts(ts: float | None) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
-def format_table(stats: list[IPStats], summary: ParseSummary) -> str:
+def format_table(
+    stats: list[IPStats], summary: ParseSummary, show_ports: bool = False
+) -> str:
     headers = ["IP", "scope", "sent", "received", "ip bytes"]
     if show_ports:
         headers.extend(["protocols", "top ports"])
@@ -95,7 +97,9 @@ def format_json(stats: list[IPStats], summary: ParseSummary) -> str:
     return json.dumps(payload, indent=2)
 
 
-def format_csv(stats: list[IPStats], summary: ParseSummary) -> str:
+def format_csv(
+    stats: list[IPStats], summary: ParseSummary, show_ports: bool = False
+) -> str:
     buf = io.StringIO()
     writer = csv.writer(buf)
     header = ["ip", "scope", "packets_sent", "packets_received", "ip_bytes"]
