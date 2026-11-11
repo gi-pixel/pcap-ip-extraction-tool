@@ -58,8 +58,8 @@ def test_enricher_failure_is_non_fatal():
 
 
 def test_cli_with_enrich_uses_json_field(sample_pcap, capsys, monkeypatch):
-    def fake_build(name):
-        if name == "asn":
+    def fake_build(names, mmdb_dir=None):
+        if names and "asn" in names:
             return [CachingEnricher(FakeEnricher({"8.8.8.8": {"org": "Google"}}))]
         return []
 
@@ -69,7 +69,6 @@ def test_cli_with_enrich_uses_json_field(sample_pcap, capsys, monkeypatch):
     parsed = json.loads(capsys.readouterr().out)
     by_ip = {ip["ip"]: ip for ip in parsed["ips"]}
     assert by_ip["8.8.8.8"]["enriched"]["fake"] == {"org": "Google"}
-
 
 def test_cli_without_enrich_has_empty_enriched(sample_pcap, capsys):
     rc = cli.main([str(sample_pcap), "--format", "json"])
@@ -110,8 +109,8 @@ def test_geo_enricher_trims_fields(tmp_path):
 
 
 def test_cli_with_geo_enrich(sample_pcap, capsys, monkeypatch):
-    def fake_build(name):
-        if name == "geo":
+    def fake_build(names, mmdb_dir=None):
+        if names and "geo" in names:
             return [CachingEnricher(FakeEnricher({"8.8.8.8": {"country": "US"}}))]
         return []
 

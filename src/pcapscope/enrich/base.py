@@ -60,8 +60,62 @@ def _is_systemic(exc: BaseException) -> bool:
         return True
     return False
 
-
 def run_enrichers(stats: Iterable[IPStats], enrichers: Iterable[Enricher]) -> None:
+    enrichers = list(enrichers)
+    if not enrichers:
+        return
+
+    stats = list(stats)
+    total = len(stats)
+
+    # Prepare phase. Offline prepare failures are fatal.
+    for enricher in enrichers:
+        prep = getattr(enricher, "prepare", None)
+        if prep is None:
+            continue
+        try:
+            prep(stats)
+        except Exception as exc:
+            if getattr(enricher, "requires_network", False):
+                continue
+            raise RuntimeError(f"{enricher.name}: prepare failed: {exc}") from exc
+
+    for enricher in enrichers:
+        service = getattr(enricher, "service", enricher.name)
+        online = getattr(enricher, "requires_network", False)
+        print(
+            f"pcapscope: enriching {total} IPs via {service}"
+            + (" (online)" if online else " (offline)"),
+            file=sys.stderr,
+        )
+
+        done = 0
+        aborted = False
+        abort_reason = ""
+        for stat in stats:
+            if aborted:
+                break
+            try:
+                result = enricher.enrich(stat.ip)
+            except Exception as exc:
+                if _is_systemic(exc) and online:
+                    stat.enriched[enricher.name] = {"error": str(exc)}
+                    aborted = True
+                    abort_reason = str(exc)
+                    break
+                stat.enriched[enricher.name] = {"error": str(exc)}
+                done += 1
+                continue
+            if result:
+                stat.enriched[enricher.name] = result
+            done += 1
+
+        if aborted:
+            print(
+                f"pcapscope: enrichment stopped after {done} of {total} IPs "
+                f"via {service}: {abort_reason}",
+                file=sys.stderr,
+            )
     """Run enrichers against stats.
 
     Error policy:
@@ -78,16 +132,17 @@ def run_enrichers(stats: Iterable[IPStats], enrichers: Iterable[Enricher]) -> No
     stats = list(stats)
     total = len(stats)
 
-    # Prepare phase: load datasets. Offline failure is fatal.
+    # Prepare phase. Offline prepare failures are fatal.
     for enricher in enrichers:
+        prep = getattr(enricher, "prepare", None)
+        if prep is None:
+            continue
         try:
-            enricher.prepare(stats)  # type: ignore[attr-defined]
+            prep(stats)
         except Exception as exc:
             if getattr(enricher, "requires_network", False):
-                continue  # online prepare is a no-op anyway
-            raise RuntimeError(
-                f"{enricher.name}: prepare failed: {exc}"
-            ) from exc
+                continue
+            raise RuntimeError(f"{enricher.name}: prepare failed: {exc}") from exc
 
     for enricher in enrichers:
         service = getattr(enricher, "service", enricher.name)

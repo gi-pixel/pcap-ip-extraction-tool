@@ -59,7 +59,6 @@ def build_parser() -> argparse.ArgumentParser:
         prog="pcapscope",
         description="Stream a pcap/pcapng file and report unique IP addresses with stats.",
     )
-    parser.add_argument("file", help="Path to a .pcap or .pcapng file")
     parser.add_argument(
         "--format",
         choices=("table", "json", "csv"),
