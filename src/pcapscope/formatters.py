@@ -61,6 +61,7 @@ def _summary_lines(summary: ParseSummary) -> list[str]:
         f"ip packets:          {summary.ip_packets}",
         f"skipped (non-ip):    {summary.skipped_non_ip}",
         f"skipped (malformed): {summary.skipped_malformed}",
+        f"public IPs named:    {summary.public_ips_named} of {summary.public_ips_total}",
     ]
 
 def format_json(stats: list[IPStats], summary: ParseSummary) -> str:
@@ -93,6 +94,8 @@ def format_json(stats: list[IPStats], summary: ParseSummary) -> str:
             "ip_packets": summary.ip_packets,
             "skipped_non_ip": summary.skipped_non_ip,
             "skipped_malformed": summary.skipped_malformed,
+            "public_ips_named": summary.public_ips_named,
+            "public_ips_total": summary.public_ips_total,
         },
     }
     return json.dumps(payload, indent=2)

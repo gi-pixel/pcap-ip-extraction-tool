@@ -22,3 +22,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+enrich-offline = ["geoip2>=4.8"]

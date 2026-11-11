@@ -100,3 +100,20 @@ def test_top_ports_ordering_is_deterministic():
     assert (tops[1]["proto"], tops[1]["port"]) == ("tcp", 80)
     assert (tops[2]["proto"], tops[2]["port"]) == ("udp", 53)
     assert tops[3]["port"] == 8080
+
+def test_summary_has_public_ips_named_line():
+    stats, summary = _sample()
+    summary.public_ips_total = 10
+    summary.public_ips_named = 7
+    out = format_table(stats, summary)
+    assert "public IPs named:" in out
+    assert "7 of 10" in out
+
+
+def test_json_summary_has_named_counters():
+    stats, summary = _sample()
+    summary.public_ips_total = 10
+    summary.public_ips_named = 7
+    parsed = json.loads(format_json(stats, summary))
+    assert parsed["summary"]["public_ips_named"] == 7
+    assert parsed["summary"]["public_ips_total"] == 10

@@ -47,9 +47,9 @@ class IPStats:
 
 @dataclass
 class ParseSummary:
-    """Counters describing what the parse stage did."""
-
     total_packets: int = 0
     ip_packets: int = 0
     skipped_non_ip: int = 0
     skipped_malformed: int = 0
+    public_ips_named: int = 0
+    public_ips_total: int = 0

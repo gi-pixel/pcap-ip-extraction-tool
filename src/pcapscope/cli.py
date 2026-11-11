@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import argparse
 import sys
+import os
 
+from .datasets import download_geolite2, download_lists
+from .enrich import (
+    ASNEnricher, ASNOnlineEnricher, CachingEnricher,
+    CloudEnricher, CountryEnricher, Enricher, GeoEnricher,
+    RDAPEnricher, ReverseDNSEnricher, TorEnricher, run_enrichers,
+)
 from .aggregate import Aggregator
 from .enrich import ASNEnricher, CachingEnricher, Enricher, GeoEnricher, run_enrichers
 from .extract import MalformedPacket, extract_record, UnsupportedLinktype
@@ -13,14 +20,30 @@ from .models import IPStats, ParseSummary
 from .reader import CaptureError, open_capture
 
 
-def _build_enrichers(name: str | None) -> list[Enricher]:
-    if name is None:
+def _build_enrichers(names: list[str] | None, mmdb_dir: str | None = None) -> list[Enricher]:
+    if not names:
         return []
-    if name == "asn":
-        return [CachingEnricher(ASNEnricher())]
-    if name == "geo":
-        return [CachingEnricher(GeoEnricher())]
-    raise ValueError(f"Unknown enricher: {name}")
+    out: list[Enricher] = []
+    for name in names:
+        if name == "asn":
+            out.append(CachingEnricher(ASNEnricher(mmdb_dir)))
+        elif name == "asn-online":
+            out.append(CachingEnricher(ASNOnlineEnricher()))
+        elif name == "country":
+            out.append(CachingEnricher(CountryEnricher(mmdb_dir)))
+        elif name == "cloud":
+            out.append(CachingEnricher(CloudEnricher()))
+        elif name == "tor":
+            out.append(CachingEnricher(TorEnricher()))
+        elif name == "rdap":
+            out.append(CachingEnricher(RDAPEnricher()))
+        elif name == "rdns":
+            out.append(CachingEnricher(ReverseDNSEnricher()))
+        elif name == "geo":
+            out.append(CachingEnricher(GeoEnricher()))
+        else:
+            raise ValueError(f"Unknown enricher: {name}")
+    return out
 
 def _positive_int(value: str) -> int:
     try:
@@ -69,15 +92,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--enrich",
-        choices=("asn", "geo"),
-        default=None,
-        help="Enrich results with external metadata (currently: asn, geo)",
+        action="append",
+        metavar="NAME",
+        help=(
+            "Enable an enricher (repeatable). Choices: "
+            "asn, asn-online, country, cloud, tor, rdap, rdns, geo"
+        ),
     )
     parser.add_argument(
         "--ports",
         action="store_true",
         help="Add protocol and port breakdown columns",
     )
+        parser.add_argument(
+        "--enrich-data",
+        metavar="DIR_OR_FILE",
+        default=None,
+        help="Path to a GeoLite2 .mmdb file (overrides the ASN/Country default)",
+    )
+    parser.add_argument("file", nargs="?", help="Path to a .pcap or .pcapng file")
     return parser
 
 
@@ -136,11 +169,15 @@ def run(args: argparse.Namespace) -> int:
     # Enrichment runs after filtering and truncation — so we never make a
     # network call for an IP the user asked us not to show.
     try:
-        enrichers = _build_enrichers(args.enrich)
+        enrichers = _build_enrichers(args.enrich, args.enrich_data)
     except ValueError as exc:
         print(f"pcapscope: error: {exc}", file=sys.stderr)
         return 1
-    run_enrichers(stats, enrichers)
+    try:
+        run_enrichers(stats, enrichers)
+    except RuntimeError as exc:
+        print(f"pcapscope: error: {exc}", file=sys.stderr)
+        return 1
 
     if args.format == "json":
         output = format_json(stats, summary)
@@ -172,10 +209,37 @@ def run(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "update-data":
+        return _update_data(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
+    if not args.file:
+        parser.error("the following arguments are required: file")
     return run(args)
 
+
+def _update_data(argv: list[str]) -> int:
+    import argparse as _argparse
+    parser = _argparse.ArgumentParser(prog="pcapscope update-data")
+    parser.add_argument("--maxmind-key", default=None)
+    args = parser.parse_args(argv)
+
+    print("Downloading public data...", file=sys.stderr)
+    download_lists("aws", "gcp", "cloudflare_v4", "cloudflare_v6", "tor")
+
+    key = args.maxmind_key or os.environ.get("MAXMIND_LICENSE_KEY")
+    if not key:
+        print(
+            "GeoLite2 skipped; set MAXMIND_LICENSE_KEY or pass --maxmind-key",
+            file=sys.stderr,
+        )
+        return 0
+    print("Downloading GeoLite2-ASN...", file=sys.stderr)
+    ok_asn = download_geolite2("asn", key)
+    print("Downloading GeoLite2-Country...", file=sys.stderr)
+    ok_country = download_geolite2("country", key)
+    return 0 if ok_asn and ok_country else 1
 
 if __name__ == "__main__":
     sys.exit(main())
