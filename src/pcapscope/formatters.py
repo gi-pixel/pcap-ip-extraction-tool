@@ -82,6 +82,7 @@ def format_json(stats: list[IPStats], summary: ParseSummary) -> str:
                 "enriched": s.enriched,
                 "enriched": s.enriched,
                 "protocols": s.protocols,
+                "ports": {f"{proto}/{port}": [tx, rx] for (proto, port), (tx, rx) in s.ports.items()},
                 "top_ports": _top_ports_json(s.ports),
                 "ports_overflow": s.ports_overflow,
             }
