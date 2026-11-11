@@ -5,6 +5,7 @@ from __future__ import annotations
 from .classify import classify_ip
 from .models import IPStats, PacketRecord
 
+MAX_TRACKED_PORTS_PER_IP = 256
 
 class Aggregator:
     """Accumulate per-IP counters. Memory scales with unique IPs only."""
@@ -23,6 +24,14 @@ class Aggregator:
         dst.packets_received += 1
         dst.bytes_received += record.length
         _touch(dst, record.timestamp)
+
+        _count_protocol(src, record.protocol)
+        _count_protocol(dst, record.protocol)
+
+        if record.src_port is not None and record.dst_port is not None:
+            proto = record.protocol.lower()
+            _count_port(src, proto, record.src_port, is_tx=True)
+            _count_port(dst, proto, record.dst_port, is_tx=False)
 
     def results(self) -> list[IPStats]:
         return list(self._stats.values())
@@ -48,3 +57,17 @@ def _touch(stats: IPStats, ts: float | None) -> None:
         stats.first_seen = ts
     if stats.last_seen is None or ts > stats.last_seen:
         stats.last_seen = ts
+
+def _count_protocol(stats: IPStats, protocol: str) -> None:
+    stats.protocols[protocol] = stats.protocols.get(protocol, 0) + 1
+
+
+def _count_port(stats: IPStats, proto: str, port: int, *, is_tx: bool) -> None:
+    key = (proto, port)
+    if key in stats.ports:
+        stats.ports[key][0 if is_tx else 1] += 1
+        return
+    if len(stats.ports) >= MAX_TRACKED_PORTS_PER_IP:
+        stats.ports_overflow += 1
+        return
+    stats.ports[key] = [1, 0] if is_tx else [0, 1]

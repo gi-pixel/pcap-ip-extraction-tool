@@ -25,6 +25,9 @@ _SUPPORTED_LINKTYPES = {
     113,  # Linux SLL
 }
 
+_PROTO_PORT_OFFSETS = {6: 0, 17: 0}  # TCP, UDP: src and dst are the first 4 bytes
+
+
 class UnsupportedLinktype(Exception):
     """Raised when the capture's link type is not supported."""
 
@@ -140,7 +143,15 @@ def _extract_ipv4(timestamp: float, payload: bytes) -> PacketRecord:
     src = socket.inet_ntop(socket.AF_INET, ip.src)
     dst = socket.inet_ntop(socket.AF_INET, ip.dst)
     protocol = _PROTO_NAMES.get(ip.p, "OTHER")
-    return PacketRecord(timestamp, src, dst, protocol, byte_count)
+
+    src_port: int | None = None
+    dst_port: int | None = None
+    if ip.p in (6, 17) and not _is_non_first_fragment(ip):
+        ports = _read_transport_ports(payload, ihl)
+        if ports is not None:
+            src_port, dst_port = ports
+
+    return PacketRecord(timestamp, src, dst, protocol, byte_count, src_port, dst_port)
 
 
 def _extract_ipv6(timestamp: float, payload: bytes) -> PacketRecord:
@@ -163,7 +174,94 @@ def _extract_ipv6(timestamp: float, payload: bytes) -> PacketRecord:
 
     src = socket.inet_ntop(socket.AF_INET6, ip6.src)
     dst = socket.inet_ntop(socket.AF_INET6, ip6.dst)
-    # ip6.p is the protocol after walking extension headers; ip6.nxt is only
-    # the first next-header value.
     protocol = _PROTO_NAMES.get(ip6.p, "OTHER")
-    return PacketRecord(timestamp, src, dst, protocol, byte_count)
+
+    src_port: int | None = None
+    dst_port: int | None = None
+    if ip6.p in (6, 17):
+        # ip6.p is the protocol after extension-header walk, but the payload
+        # offset is 40 + total extension-header length. dpkt exposes the
+        # extension-header length via `ip6.opt_len` for the chain it walked.
+        # Safer: use the packet length minus the transport payload length.
+        # dpkt sets ip6.data to the transport-layer payload, but for truncated
+        # packets that's unreliable. Compute offset from the header chain.
+        ext_len = _ipv6_extension_header_length(payload, ip6.nxt)
+        if ext_len is not None:
+            ports = _read_transport_ports(payload, 40 + ext_len)
+            if ports is not None:
+                src_port, dst_port = ports
+
+    return PacketRecord(timestamp, src, dst, protocol, byte_count, src_port, dst_port)
+
+
+
+def _is_non_first_fragment(ip: "dpkt.ip.IP") -> bool:
+    """True if this IPv4 packet is a fragment and not the first fragment."""
+    # IPv4 flags: bit 0 (0x1) = MF, bit 1 (0x2) = DF.
+    # If fragment offset > 0, this is not the first fragment: no transport header.
+    return bool(ip.off & 0x1FFF)
+
+
+def _read_transport_ports(payload: bytes, offset: int) -> tuple[int, int] | None:
+    """Read src and dst ports from a transport header at `offset` in `payload`.
+
+    Returns None if fewer than 4 bytes are available (snaplen truncation).
+    """
+    if len(payload) < offset + 4:
+        return None
+    src_port = int.from_bytes(payload[offset : offset + 2], "big")
+    dst_port = int.from_bytes(payload[offset + 2 : offset + 4], "big")
+    return src_port, dst_port
+
+
+def _ipv6_extension_header_length(payload: bytes, first_next_header: int) -> int | None:
+    """Walk IPv6 extension headers starting at byte 40 and return total ext length.
+
+    `first_next_header` is the value from the IPv6 fixed header (ip6.nxt).
+    Returns 0 if no extension headers are present, or None if the walk runs
+    out of captured bytes.
+    """
+    # Extension header type numbers that we walk past to find the transport header.
+    #   0   = Hop-by-Hop Options
+    #   43  = Routing
+    #   60  = Destination Options
+    #   51  = Authentication Header (different length encoding: (len+2)*4)
+    #   44  = Fragment (fixed 8 bytes; may not contain ports if not first fragment)
+    #   50  = ESP (encrypted; no ports visible)
+    # TCP = 6, UDP = 17: these are transport, stop.
+    offset = 40
+    nxt = first_next_header
+    while True:
+        if nxt in (6, 17, 58):  # transport or ICMPv6 (ICMPv6 has no ports)
+            return offset - 40
+        if nxt == 44:  # Fragment header: 8 bytes fixed
+            if len(payload) < offset + 8:
+                return None
+            # Fragment offset in bits 3-15 of the second 16-bit word.
+            frag_field = int.from_bytes(payload[offset + 2 : offset + 4], "big")
+            # offset in 8-byte units; if > 0, not the first fragment: no ports.
+            if (frag_field >> 3) > 0:
+                return None  # signal "no ports available"
+            nxt = payload[offset]
+            offset += 8
+            continue
+        if nxt == 51:  # Authentication Header: (len + 2) * 4 bytes
+            if len(payload) < offset + 2:
+                return None
+            ah_len = (payload[offset + 1] + 2) * 4
+            if len(payload) < offset + ah_len:
+                return None
+            nxt = payload[offset]
+            offset += ah_len
+            continue
+        if nxt in (0, 43, 60):  # Hop-by-Hop, Routing, Destination Options
+            if len(payload) < offset + 2:
+                return None
+            ext_len = (payload[offset + 1] + 1) * 8
+            if len(payload) < offset + ext_len:
+                return None
+            nxt = payload[offset]
+            offset += ext_len
+            continue
+        # Unknown extension header or ESP: we can't find the transport header.
+        return None

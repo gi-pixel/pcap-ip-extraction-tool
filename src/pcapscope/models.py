@@ -15,6 +15,8 @@ class PacketRecord:
     dst_ip: str
     protocol: str  # TCP, UDP, ICMP, OTHER
     length: int
+    src_port: int | None = None
+    dst_port: int | None = None
 
 
 @dataclass
@@ -30,6 +32,9 @@ class IPStats:
     last_seen: float | None = None
     scope: str = ""
     enriched: dict[str, Any] = field(default_factory=dict)
+    protocols: dict[str, int] = field(default_factory=dict)
+    ports: dict[tuple[str, int], list[int]] = field(default_factory=dict)
+    ports_overflow: int = 0
 
     @property
     def total_packets(self) -> int:

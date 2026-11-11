@@ -73,6 +73,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Enrich results with external metadata (currently: asn, geo)",
     )
+        parser.add_argument(
+        "--ports",
+        action="store_true",
+        help="Add protocol and port breakdown columns",
+    )
     return parser
 
 
@@ -140,9 +145,9 @@ def run(args: argparse.Namespace) -> int:
     if args.format == "json":
         output = format_json(stats, summary)
     elif args.format == "csv":
-        output = format_csv(stats, summary)
+        output = format_csv(stats, summary, show_ports=args.ports)
     else:
-        output = format_table(stats, summary)
+        output = format_table(stats, summary, show_ports=args.ports)
 
     if args.output:
         try:
