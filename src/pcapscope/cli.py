@@ -73,7 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Enrich results with external metadata (currently: asn, geo)",
     )
-        parser.add_argument(
+    parser.add_argument(
         "--ports",
         action="store_true",
         help="Add protocol and port breakdown columns",
