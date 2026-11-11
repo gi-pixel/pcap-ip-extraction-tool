@@ -104,7 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Add protocol and port breakdown columns",
     )
-        parser.add_argument(
+    parser.add_argument(
         "--enrich-data",
         metavar="DIR_OR_FILE",
         default=None,
